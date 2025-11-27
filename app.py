@@ -81,17 +81,24 @@ def load_models():
     The try/except keeps it compatible with older local PyTorch versions that
     don't know the weights_only argument.
     """
-    def _load_model(path: str):
-        # First try PyTorch>=2.6 signature
+    def _load_model(path):
+        """
+        Safe model loader for PyTorch 2.6 on Streamlit Cloud.
+        First tries weights_only=True, then falls back.
+        """
         try:
-            obj = torch.load(path, map_location="cpu", weights_only=False)
-        except TypeError:
-            # Fallback for older PyTorch (no weights_only arg)
-            obj = torch.load(path, map_location="cpu")
+            # First try strict loading (PyTorch 2.6+)
+            obj = torch.load(path, map_location="cpu", weights_only=True)
+            return obj, None
+        except:
+            try:
+                # Fallback: load full pickle (ONLY SAFE BECAUSE FILE IS YOURS)
+                obj = torch.load(path, map_location="cpu", weights_only=False)
+                return obj, None
+            except Exception as e:
+                st.error(f"Failed to load model {path}: {e}")
+                raise e
 
-        if isinstance(obj, dict) and "model" in obj:
-            return obj["model"], obj
-        return obj, None
 
     mf_model, mf_ckpt = _load_model(MF_PATH)
     bayes_mf_vi_model, bayes_ckpt = _load_model(BAYES_MF_VI_PATH)
