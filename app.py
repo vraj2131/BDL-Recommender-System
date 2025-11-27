@@ -76,53 +76,85 @@ def load_models():
     """
     Load the four trained models from disk.
 
-    We explicitly set weights_only=False for PyTorch>=2.6 (e.g. Streamlit Cloud),
-    because these .pt files contain full pickled objects, not just tensor weights.
-    The try/except keeps it compatible with older local PyTorch versions that
-    don't know the weights_only argument.
+    File formats (how they were saved in sol.ipynb):
+
+      - Baseline MF:
+          torch.save(mf_warm.state_dict(), "mf_warm_model.pt")
+        => pure state_dict (OrderedDict with 'user_factors.weight', 'item_factors.weight', ...)
+
+      - Baseline MF (VI):
+          torch.save({
+              'model_state_dict': bmf_vi.state_dict(),
+              'num_users': num_users,
+              'num_items': num_items,
+              'K': bmf_vi.K,
+              'global_mean': global_mean
+          }, "bayesian_mf_vi_warm.pt")
+
+      - Core VI (HBMFSI_VI):
+          torch.save({
+              "model_state_dict": hbmfsi_vi.state_dict(),
+              "num_users": num_users,
+              "num_items": num_items,
+              "P": P,
+              "Q": Q,
+              "K": hbmfsi_vi.K,
+              "global_mean": global_mean,
+          }, "hbmfsi_vi_warm.pt")
+
+      - Core MCMC:
+          torch.save(
+              {
+                  "samples": {k: v.cpu() for k, v in mcmc_samples.items()},
+                  "F_sub_shape": F_sub.shape,
+                  "G_sub_shape": G_sub.shape,
+                  "K": 20,
+                  "global_mean": mcmc_global_mean,
+              },
+              "hbmfsi_mcmc_warm_subset.pt",
+          )
+
+    We explicitly use weights_only=False because these are full pickles/state_dicts,
+    not "weights-only" safetensors. The TypeError fallback keeps it compatible with
+    older local PyTorch that doesn't know the weights_only argument.
     """
-    def _load_model(path):
-        """
-        Safe model loader for PyTorch 2.6 on Streamlit Cloud.
-        First tries weights_only=True, then falls back.
-        """
+
+    def _load_model(path: str):
         try:
-            # First try strict loading (PyTorch 2.6+)
-            obj = torch.load(path, map_location="cpu", weights_only=True)
-            return obj, None
-        except:
-            try:
-                # Fallback: load full pickle (ONLY SAFE BECAUSE FILE IS YOURS)
-                obj = torch.load(path, map_location="cpu", weights_only=False)
-                return obj, None
-            except Exception as e:
-                st.error(f"Failed to load model {path}: {e}")
-                raise e
+            # PyTorch 2.6+ (Streamlit Cloud)
+            obj = torch.load(path, map_location="cpu", weights_only=False)
+        except TypeError:
+            # Older PyTorch (no weights_only kwarg)
+            obj = torch.load(path, map_location="cpu")
+        # 'meta' is just the raw checkpoint object for now
+        return obj, obj
 
+    # ---- Load all artifacts with the correct formats ----
+    mf_model, mf_meta             = _load_model(MF_PATH)             # state_dict
+    bayes_mf_vi_model, bayes_meta = _load_model(BAYES_MF_VI_PATH)    # dict
+    hbmfsi_vi_model, hb_vi_meta   = _load_model(HBMFSI_VI_PATH)      # dict
+    mcmc_obj, mcmc_meta           = _load_model(HBMFSI_MCMC_PATH)    # dict
 
-    mf_model, mf_ckpt = _load_model(MF_PATH)
-    bayes_mf_vi_model, bayes_ckpt = _load_model(BAYES_MF_VI_PATH)
-    hbmfsi_vi_model, hb_vi_ckpt = _load_model(HBMFSI_VI_PATH)
-    mcmc_obj, mcmc_ckpt = _load_model(HBMFSI_MCMC_PATH)
-
+    # IMPORTANT: Keys must match what you use elsewhere in the app
     return {
         "Baseline MF": {
             "model": mf_model,
-            "meta": mf_ckpt,
+            "meta": mf_meta,
         },
         "Baseline MF (VI)": {
             "model": bayes_mf_vi_model,
-            "meta": bayes_ckpt,
+            "meta": bayes_meta,
         },
         "Core VI": {
             "model": hbmfsi_vi_model,
-            "meta": hb_vi_ckpt,
+            "meta": hb_vi_meta,
         },
         "Core MCMC": {
             "model": mcmc_obj,
-            "meta": mcmc_ckpt,
+            "meta": mcmc_meta,
         },
     }
+
 
 
 
