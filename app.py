@@ -76,30 +76,47 @@ def load_models():
     """
     Load the four trained models from disk.
 
-    Notes on formats:
-      - MF:            plain state_dict
-      - Bayesian MF:   dict with 'model_state_dict', 'num_users', ...
-      - HBMFSI_VI:     dict with 'model_state_dict', 'P', 'Q', ...
-      - HBMFSI_MCMC:   dict with 'samples', 'F_sub_shape', ...
+    We explicitly set weights_only=False for PyTorch>=2.6 (e.g. Streamlit Cloud),
+    because these .pt files contain full pickled objects, not just tensor weights.
+    The try/except keeps it compatible with older local PyTorch versions that
+    don't know the weights_only argument.
     """
-    def _load_model(path):
-        obj = torch.load(path, map_location="cpu")
-        # In case you ever save {"model": model, ...}
+    def _load_model(path: str):
+        # First try PyTorch>=2.6 signature
+        try:
+            obj = torch.load(path, map_location="cpu", weights_only=False)
+        except TypeError:
+            # Fallback for older PyTorch (no weights_only arg)
+            obj = torch.load(path, map_location="cpu")
+
         if isinstance(obj, dict) and "model" in obj:
             return obj["model"], obj
-        return obj, obj if isinstance(obj, dict) else None
+        return obj, None
 
-    mf_model, mf_meta = _load_model(MF_PATH)
-    bayes_mf_vi, bayes_meta = _load_model(BAYES_MF_VI_PATH)
-    hbmfsi_vi, hb_vi_meta = _load_model(HBMFSI_VI_PATH)
-    hbmfsi_mcmc, hb_mcmc_meta = _load_model(HBMFSI_MCMC_PATH)
+    mf_model, mf_ckpt = _load_model(MF_PATH)
+    bayes_mf_vi_model, bayes_ckpt = _load_model(BAYES_MF_VI_PATH)
+    hbmfsi_vi_model, hb_vi_ckpt = _load_model(HBMFSI_VI_PATH)
+    mcmc_obj, mcmc_ckpt = _load_model(HBMFSI_MCMC_PATH)
 
     return {
-        "Baseline MF": {"model": mf_model, "meta": mf_meta},
-        "Baseline MF (VI)": {"model": bayes_mf_vi, "meta": bayes_meta},
-        "Core VI": {"model": hbmfsi_vi, "meta": hb_vi_meta},
-        "Core MCMC": {"model": hbmfsi_mcmc, "meta": hb_mcmc_meta},
+        "Baseline MF": {
+            "model": mf_model,
+            "meta": mf_ckpt,
+        },
+        "Baseline MF (VI)": {
+            "model": bayes_mf_vi_model,
+            "meta": bayes_ckpt,
+        },
+        "Core VI": {
+            "model": hbmfsi_vi_model,
+            "meta": hb_vi_ckpt,
+        },
+        "Core MCMC": {
+            "model": mcmc_obj,
+            "meta": mcmc_ckpt,
+        },
     }
+
 
 
 # ---------------------------------------------------------
